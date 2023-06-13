@@ -1,0 +1,83 @@
+import numpy as np
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Layer
+from tensorflow.keras import Input, Model
+from tensorflow.keras import optimizers
+import tensorflow as tf
+
+from ..layers.taylor import TaylorMap
+
+
+
+
+
+class Regression:
+    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True):
+        self.order = order
+        self.steps = steps
+        self.is_scale = is_scale
+        self._min = np.zeros(num_features+num_targets)
+        self._ptp = np.ones(num_features+num_targets)
+
+        self.num_features = num_features
+        self.num_targets = num_targets
+        self.pnn, self.pnn_hidden = self.create_graph()
+        self.set_learning_rate(learning_rate)
+        return
+
+    def create_graph(self):
+        inputDim = self.num_features + self.num_targets
+        outputDim = self.num_features + self.num_targets
+
+        input = Input(shape=(inputDim,))
+        m = input
+        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order)
+
+        outs = []
+        for i in range(self.steps):
+            m = tm(m)
+            outs.append(m)
+
+        model = Model(inputs=input, outputs=m)
+        model_full = Model(inputs=input, outputs=outs)
+
+        return model, model_full
+
+    def custom_loss(self, y_true, y_pred):
+        # return K.sum(K.square(y_true[:, -1] - y_pred[:, -1]))
+        squared_error = (y_pred[:, -self.num_targets:] - y_true[:, -self.num_targets:])**2
+        mse = K.mean(squared_error, axis=0)
+        return K.mean(mse)
+
+    def set_learning_rate(self, learning_rate):
+        self.pnn.compile(loss=self.custom_loss, optimizer=optimizers.Adamax(learning_rate=learning_rate))
+        return
+
+    def scale(self, X, Y=None):
+        if Y is None:
+            return (X - self._min[:self.num_features])/self._ptp[:self.num_features]
+        else:
+            data = np.hstack((X, Y))
+            self._min = data.min(0)
+            self._ptp = data.ptp(0)
+            data = (data-self._min)/self._ptp
+            return data[:, :self.num_features].reshape(-1, self.num_features), data[:, -self.num_targets:].reshape(-1, self.num_targets)
+
+    def rescale(self, X_output):
+        return X_output*self._ptp + self._min
+
+    def fit(self, X, Y, epochs, batch_size=256, verbose=1):
+        if self.is_scale:
+            X, Y = self.scale(X, Y)
+        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
+        self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose)
+        return
+
+    def predict(self, X):
+        if self.is_scale:
+            X = self.scale(X)
+        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
+        X_pred = self.pnn.predict(X_input)
+        X_pred = self.rescale(X_pred)
+        return X_pred[:,-self.num_targets:]
+

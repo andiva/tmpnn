@@ -6,6 +6,8 @@ setup(
     python_requires='>3.6',
     version=tmpnn.__version__,
     packages=find_packages(),
+    install_requires=['tensorflow==2.2.0',
+                     ],
     author='Andrei Ivanov',
     author_email='05x.andrey@gmail.com',
     url='https://github.com/andiva/tmpnn',
