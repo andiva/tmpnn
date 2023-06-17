@@ -1,17 +1,15 @@
 import numpy as np
+import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras import Input, Model
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers.legacy import Adamax as Opt
-import tensorflow as tf
 
-from ..layers.taylor import TaylorMap
-
-
+from taylor import TaylorMap
 
 
 class Regression:
-    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True):
+    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True, alpha=0):
         self.order = order
         self.steps = steps
         self.is_scale = is_scale
@@ -20,8 +18,11 @@ class Regression:
 
         self.num_features = num_features
         self.num_targets = num_targets
+        self.alpha = alpha
         self.pnn, self.pnn_hidden = self.create_graph()
         self.set_learning_rate(learning_rate)
+
+        self.X = None
         return
 
     def create_graph(self):
@@ -30,7 +31,8 @@ class Regression:
 
         input = Input(shape=(inputDim,))
         m = input
-        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order)
+        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order, 
+            weights_regularizer=tf.keras.regularizers.L1(self.alpha/self.steps))
 
         outs = []
         for i in range(self.steps):
@@ -43,7 +45,6 @@ class Regression:
         return model, model_full
 
     def custom_loss(self, y_true, y_pred):
-        # return K.sum(K.square(y_true[:, -1] - y_pred[:, -1]))
         squared_error = (y_pred[:, -self.num_targets:] - y_true[:, -self.num_targets:])**2
         mse = K.mean(squared_error, axis=0)
         return K.mean(mse)
@@ -69,7 +70,10 @@ class Regression:
         if self.is_scale:
             X, Y = self.scale(X, Y)
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
-        return self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose, validation_data=validation_data)
+        self.Z = X_input
+        history = self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose, validation_data=validation_data)
+        self.Z = None
+        return history
 
     def predict(self, X, verbose=0):
         if self.is_scale:
