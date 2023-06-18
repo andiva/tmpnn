@@ -1,11 +1,11 @@
 import numpy as np
+import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Layer
-import tensorflow as tf
 
 class TaylorMap(Layer):
     '''Polynomial layers implementing Taylor mapping'''
-    def __init__(self, output_dim, order=1, weights_regularizer = tf.keras.regularizers.L1(0.001), **kwargs):
+    def __init__(self, output_dim, order=1, weights_regularizer = None, **kwargs):
         self.output_dim = output_dim
         self.order = order if order > 1 else 1 # first order at least
         self.weights_regularizer = weights_regularizer
@@ -50,8 +50,7 @@ class TaylorMap(Layer):
             ans = ans + K.dot(tmp, self.W[i])
 
         if self.weights_regularizer:
-            for w in self.W:
-                self.add_loss(self.weights_regularizer(w))
+            self.add_loss(self.weights_regularizer(self.W, x))
 
         return ans
 
