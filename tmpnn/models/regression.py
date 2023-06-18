@@ -9,10 +9,12 @@ from ..layers.taylor import TaylorMap
 
 
 class Regression:
-    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True, regularizer=None):
+    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, scale=1, shift=True,regularizer=None):
         self.order = order
         self.steps = steps
-        self.is_scale = is_scale
+
+        self.scale = scale
+        self.shift = scale/2 * shift
         self._min = np.zeros(num_features+num_targets)
         self._ptp = np.ones(num_features+num_targets)
 
@@ -41,40 +43,42 @@ class Regression:
 
         return model, model_full
 
-    def custom_loss(self, y_true, y_pred):
+    def _custom_loss(self, y_true, y_pred):
         squared_error = (y_pred[:, -self.num_targets:] - y_true[:, -self.num_targets:])**2
         mse = K.mean(squared_error, axis=0)
         return K.mean(mse)
 
     def set_learning_rate(self, learning_rate):
-        self.pnn.compile(loss=self.custom_loss, optimizer=Opt(learning_rate=learning_rate))
+        self.pnn.compile(loss=self._custom_loss, optimizer=Opt(learning_rate=learning_rate))
         return
 
-    def scale(self, X, Y=None):
+    def _scale(self, X, Y=None):
         if Y is None:
-            return (X - self._min[:self.num_features])/self._ptp[:self.num_features]-0.5
+            return (X - self._min[:self.num_features])/self._ptp[:self.num_features]-self.shift
         else:
             data = np.column_stack([X, Y])
             self._min = data.min(0)
-            self._ptp = data.ptp(0)
-            data = (data-self._min)/self._ptp-0.5
+            self._ptp = data.ptp(0)/self.scale
+            data = (data-self._min)/self._ptp-self.shift
             return data[:, :self.num_features].reshape(-1, self.num_features), data[:, -self.num_targets:].reshape(-1, self.num_targets)
 
-    def rescale(self, X_output):
-        return (X_output+0.5)*self._ptp + self._min
+    def _rescale(self, X_output):
+        return (X_output+self.shift)*self._ptp + self._min
 
     def fit(self, X, Y, epochs=1000, batch_size=256, verbose=1, validation_data=None):
-        if self.is_scale:
-            X, Y = self.scale(X, Y)
+        if self.scale>0:
+            X, Y = self._scale(X, Y) # can lead to misstraing if fitting different data regions sequentially TODO
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
         history = self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose, validation_data=validation_data)
         return history
 
     def predict(self, X, verbose=0):
-        if self.is_scale:
-            X = self.scale(X)
+        if self.scale>0:
+            X = self._scale(X)
+
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
         X_pred = self.pnn.predict(X_input, verbose)
-        if self.is_scale:
-            X_pred = self.rescale(X_pred)
+
+        if self.scale>0:
+            X_pred = self._rescale(X_pred)
         return X_pred[:,-self.num_targets:]
