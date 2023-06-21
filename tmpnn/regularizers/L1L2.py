@@ -1,6 +1,6 @@
-from keras.regularizers import L1 as l1, L2 as l2
+from keras.regularizers import L1 as base1, L2 as base2
 
-class L1(l1):
+class L1(base1):
     def __init__(self, l1=0.01, **kwargs):
         super().__init__(l1, **kwargs)
 
@@ -13,7 +13,7 @@ class L1(l1):
     def get_config(self):
         return super().get_config()
     
-class L2(l2):
+class L2(base2):
     def __init__(self, l2=0.01, **kwargs):
         super().__init__(l2, **kwargs)
 
