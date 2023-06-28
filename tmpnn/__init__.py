@@ -1,5 +1,5 @@
 __version__ = '0.0.1'
 
-from .layers.taylor import TaylorMap
 from .models.regression import Regression
-from . import regularizers
+from .models.classification import Classification
+from .regularizers import L1, L2, Lyapunov1, Lyapunov2

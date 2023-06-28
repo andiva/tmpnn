@@ -39,7 +39,7 @@ class TaylorMap(Layer):
         return
 
 
-    def call(self, x, mask=None):
+    def call(self, x, mask=None, reg=False):
         ans = self.W[0] + K.dot(x, self.W[1]) # first order at least
         x_vectors = tf.expand_dims(x, -1)
         tmp = x
@@ -49,7 +49,7 @@ class TaylorMap(Layer):
             tmp = tf.reshape(x_extend_matrix, [-1, self.num_monomials[i]])
             ans = ans + K.dot(tmp, self.W[i])
 
-        if self.weights_regularizer:
+        if reg and self.weights_regularizer:
             self.add_loss(self.weights_regularizer(self.W, x))
 
         return ans
