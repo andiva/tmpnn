@@ -165,3 +165,5 @@ catboost_info/
 
 # macos
 .DS_Store
+
+demo
