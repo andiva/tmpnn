@@ -1,1 +1,2 @@
-from . import regression
+from .classification import TmPNNCLassifier
+from .regression import TmPNNRegressor

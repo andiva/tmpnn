@@ -1,63 +1,43 @@
-import numpy as np
 import tensorflow as tf
-from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer
 
-class TaylorMap(Layer):
-    '''Polynomial layers implementing Taylor mapping'''
-    def __init__(self, output_dim, order=1, weights_regularizer = None, **kwargs):
-        self.output_dim = output_dim
-        self.order = order if order > 1 else 1 # first order at least
-        self.weights_regularizer = weights_regularizer
-        super(TaylorMap, self).__init__(**kwargs)
-        return
 
-    def initial_weights_zeros(self):
-        ''' Returns [0, I, 0, 0, ...] '''
-        n = 1
-        self.num_monomials = [n]
-        yield np.zeros((n, self.output_dim)) # return W0
+class TaylorKronekerLayer(tf.keras.layers.Layer):
+    '''Polynomial layer implementing Taylor mapping'''
 
-        self.num_monomials.append(self.output_dim)
-        yield np.eye(self.output_dim) # return W1
+    def __init__(self, order=2, weights_initializer='zeros', weights_regularizer: tf.keras.regularizers.Regularizer = None,
+                 name=None, dtype=None, **kwargs):
+        super().__init__(True, name, dtype, **kwargs)
+        self.order = order
+        self.initializer = weights_initializer
+        self.regularizer = weights_regularizer
 
-        for i in range(2, self.order+1):
-            self.num_monomials.append(self.num_monomials[-1]*self.output_dim)
-            yield np.zeros((self.num_monomials[-1], self.output_dim)) # return W2, ...
-
+    def get_config(self):
+        return {**super().get_config(), 'order': self.order, 'weights_initializer': self.initializer,
+                'weights_regularizer': tf.keras.saving.serialize_keras_object(self.regularizer)}
 
     def build(self, input_shape):
-        input_dim = input_shape[1]
-        if input_dim != self.output_dim:
-            raise ValueError("input_dim and output_dim have to be equal for Taylor mapping")
+        input_dim = input_shape[-1]
+        self.W = [self.add_weight(None, (input_dim**i, input_dim), self.dtype, 
+                            self.initializer, self.regularizer 
+                            if i!=1 else lambda w: self.regularizer(w-tf.eye(input_dim)) #
+                            ) for i in range(self.order + 1)]
+        self.W[1].assign_add(tf.eye(input_dim)) #
 
-        self.W = []
-        for w in self.initial_weights_zeros():
-            self.W.append(K.variable(w))
-
-        self._trainable_weights = self.W
-        return
-
-
-    def call(self, x, mask=None, reg=False):
-        ans = self.W[0] + K.dot(x, self.W[1]) # first order at least
-        x_vectors = tf.expand_dims(x, -1)
-        tmp = x
-        for i in range(2, self.order+1):
+    def call(self, inputs, is_last=False, *args, **kwargs): 
+        outputs = self.W[0] + tf.keras.backend.dot(inputs, self.W[1]) # + inputs
+        x_vectors = tf.expand_dims(inputs, -1)
+        tmp = inputs
+        for i in range(2, self.order + 1):
             xext_vectors = tf.expand_dims(tmp, -1)
-            x_extend_matrix = tf.matmul(x_vectors, xext_vectors, adjoint_a=False, adjoint_b=True)
-            tmp = tf.reshape(x_extend_matrix, [-1, self.num_monomials[i]])
-            ans = ans + K.dot(tmp, self.W[i])
-
-        if reg and self.weights_regularizer:
-            self.add_loss(self.weights_regularizer(self.W, x))
-
-        return ans
+            x_extend_matrix = tf.matmul(
+                x_vectors, xext_vectors, adjoint_a=False, adjoint_b=True)
+            tmp = tf.reshape(x_extend_matrix, [-1, inputs.shape[-1]**i])
+            outputs = outputs + tf.keras.backend.dot(tmp, self.W[i])
+        return outputs
 
 
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.output_dim)
-
-
-    def get_output_shape_for(self, input_shape):
-        return (input_shape[0], self.output_dim)
+if __name__ == '__main__':
+    input = tf.constant([[1, 1], [1, 1], [1, 1]], dtype=tf.float32)
+    layer = TaylorKronekerLayer(3, 'random_normal')
+    layer.build(input.shape)
+    print(layer.call(input))
