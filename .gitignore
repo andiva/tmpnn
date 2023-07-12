@@ -157,8 +157,11 @@ cython_debug/
 
 # data files
 *.data
+*.dat
 *.csv
 *.xls
+*.mat
+breezy-stefan
 
 # catboost
 catboost_info/
@@ -166,4 +169,3 @@ catboost_info/
 # macos
 .DS_Store
 
-demo

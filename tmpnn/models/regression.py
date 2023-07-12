@@ -1,118 +1,79 @@
-from sklearn.base import BaseEstimator
-
 import numpy as np
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Layer
+from tensorflow.keras import Input, Model
+from tensorflow.keras import optimizers
 import tensorflow as tf
-# from tensorflow.keras import backend as K
-# from tensorflow.keras import Input, Model
-# from tensorflow.keras.callbacks import EarlyStopping
-# from tensorflow.keras.optimizers.legacy import Adamax as Opt
-from keras import backend as K
-from keras import Input, Model
-from keras.optimizers.legacy import Adamax as Opt
-
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from tqdm.keras import TqdmCallback
 
 from ..layers.taylor import TaylorMap
-from ..layers.selective import Selective
 
 
-class Regression(BaseEstimator):
-    def __init__(self, num_features, num_targets, order=2, steps=10, verbose=0,
-                 regularizer=None, learning_rate=1e-3, init=None):
-        self.verbose = verbose
+class Regression:
+    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True):
         self.order = order
         self.steps = steps
+        self.is_scale = is_scale
+        self._min = np.zeros(num_features+num_targets)
+        self._ptp = np.ones(num_features+num_targets)
 
         self.num_features = num_features
         self.num_targets = num_targets
-
-        self.pnn, self.pnn_hidden = self.create_graph(regularizer)
+        self.pnn, self.pnn_hidden = self.create_graph()
         self.set_learning_rate(learning_rate)
-        self.init = init
         return
-    
-    def get_params(self, deep: bool = True) -> dict:
-        params={'verbose':self.verbose,
-                'order':self.order,
-                'steps':self.steps,
-                'num_features':self.num_features,
-                'num_targets':self.num_targets,
-                'init':self.init}
-        if deep:
-            params['pnn']=self.pnn
-            params['pnn_hidden']=self.pnn_hidden
-        return params
-    
-    def set_params(self, **params):
-        self.verbose = params['verbose']
-        self.order = params['order']
-        self.steps = params['steps']
-        self.num_features = params['num_features']
-        self.num_targets = params['num_targets']
-        self.init = params['init']
-        if 'pnn' in params:
-            self.pnn = params['pnn']
-            self.pnn_hidden = params['pnn_hidden']
-        return self
 
-    def create_graph(self, regularizer=None):
+    def create_graph(self):
         inputDim = self.num_features + self.num_targets
+        outputDim = self.num_features + self.num_targets
 
         input = Input(shape=(inputDim,))
         m = input
-        tm = TaylorMap(output_dim = inputDim, input_shape = (inputDim,), order=self.order, 
-            weights_regularizer=regularizer)
+        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order)
 
         outs = []
-        for i in range(self.steps-1):
-            m = tm(m,reg=False)
+        for i in range(self.steps):
+            m = tm(m)
             outs.append(m)
-        m = tm(m,reg=True)
-        outs.append(m)
-
-        s = Selective(self.num_targets, False)
-        m = s(m)
-        outs.append(m)
 
         model = Model(inputs=input, outputs=m)
         model_full = Model(inputs=input, outputs=outs)
 
         return model, model_full
 
-    def set_learning_rate(self, learning_rate, loss=None, metrics=None):
-        self.pnn.compile(optimizer=Opt(learning_rate=learning_rate), 
-                         loss='mse' if not loss else loss, 
-                         metrics=metrics)
+    def custom_loss(self, y_true, y_pred):
+        # return K.sum(K.square(y_true[:, -1] - y_pred[:, -1]))
+        squared_error = (y_pred[:, -self.num_targets:] - y_true[:, -self.num_targets:])**2
+        mse = K.mean(squared_error, axis=0)
+        return K.mean(mse)
+
+    def set_learning_rate(self, learning_rate):
+        self.pnn.compile(loss=self.custom_loss, optimizer=optimizers.legacy.Adamax(learning_rate=learning_rate))
         return
 
-    def fit(self, X, Y, epochs=100, batch_size=256, verbose=None, 
-            validation_data=None, stop_monitor=None, patience=10):
-        
-        callbacks=[]
-        if stop_monitor:
-            callbacks.append( EarlyStopping(monitor=stop_monitor, patience=patience) )
-        if not verbose:
-            verbose = self.verbose
-        if verbose == 2:
-            callbacks.append( TqdmCallback(verbose=0) )
-            verbose = 0
+    def scale(self, X, Y=None):
+        if Y is None:
+            return (X - self._min[:self.num_features])/self._ptp[:self.num_features]
+        else:
+            data = np.hstack((X, Y))
+            self._min = data.min(0)
+            self._ptp = data.ptp(0)
+            data = (data-self._min)/self._ptp
+            return data[:, :self.num_features].reshape(-1, self.num_features), data[:, -self.num_targets:].reshape(-1, self.num_targets)
 
-        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets)) if self.init is None 
-                             else self.init(X) if callable(self.init) else self.init))
-        
-        if validation_data:
-            X_val, Y_val = validation_data
-            validation_data = (np.hstack((X_val, np.zeros((X_val.shape[0], self.num_targets)) if self.init is None 
-                             else self.init(X_val) if callable(self.init) else self.init)), Y_val)
+    def rescale(self, X_output):
+        return X_output*self._ptp + self._min
 
-        history = self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose, 
-                               validation_data=validation_data, callbacks=callbacks)
-        return history
+    def fit(self, X, Y, epochs, batch_size=256, verbose=1):
+        if self.is_scale:
+            X, Y = self.scale(X, Y)
+        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
+        return self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose,
+                            callbacks = [tf.keras.callbacks.ReduceLROnPlateau('loss',0.2,20)])
 
     def predict(self, X):
-        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets)) if self.init is None 
-                             else self.init(X) if callable(self.init) else self.init))
-        X_pred = self.pnn.predict(X_input, verbose=0)
-
-        return X_pred
+        if self.is_scale:
+            X = self.scale(X)
+        X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
+        X_pred = self.pnn.predict(X_input,verbose=0)
+        X_pred = self.rescale(X_pred)
+        return X_pred[:,-self.num_targets:]
