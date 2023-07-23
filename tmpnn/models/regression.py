@@ -3,23 +3,23 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Layer
 from tensorflow.keras import Input, Model
 from tensorflow.keras import optimizers
+# from keras import backend as K
+# from keras.layers import Layer
+# from keras import Input, Model
+# from keras import optimizers
 import tensorflow as tf
 
 from ..layers.taylor import TaylorMap
 
 
 class Regression:
-    def __init__(self, num_features, num_targets, order=2, steps=10, learning_rate=1e-3, is_scale=True):
+    def __init__(self, num_features, num_targets, order=2, steps=10):
         self.order = order
         self.steps = steps
-        self.is_scale = is_scale
-        self._min = np.zeros(num_features+num_targets)
-        self._ptp = np.ones(num_features+num_targets)
 
         self.num_features = num_features
         self.num_targets = num_targets
         self.pnn, self.pnn_hidden = self.create_graph()
-        self.set_learning_rate(learning_rate)
         return
 
     def create_graph(self):
@@ -46,34 +46,20 @@ class Regression:
         mse = K.mean(squared_error, axis=0)
         return K.mean(mse)
 
-    def set_learning_rate(self, learning_rate):
-        self.pnn.compile(loss=self.custom_loss, optimizer=optimizers.legacy.Adamax(learning_rate=learning_rate))
-        return
+    def fit(self, X, Y, epochs, lr=1e-3, batch_size=256, verbose=1, eval_set=None, callbacks=[], opt=None):
+        self.pnn.compile(loss=self.custom_loss, 
+                         optimizer=opt or optimizers.legacy.Adamax(learning_rate=lr))
+        
+        if eval_set:
+            ev_X, ev_Y = eval_set[0], eval_set[1]
+            eval_set = (np.hstack((ev_X, np.zeros((ev_X.shape[0], self.num_targets)))), ev_Y)
 
-    def scale(self, X, Y=None):
-        if Y is None:
-            return (X - self._min[:self.num_features])/self._ptp[:self.num_features]
-        else:
-            data = np.hstack((X, Y))
-            self._min = data.min(0)
-            self._ptp = data.ptp(0)
-            data = (data-self._min)/self._ptp
-            return data[:, :self.num_features].reshape(-1, self.num_features), data[:, -self.num_targets:].reshape(-1, self.num_targets)
-
-    def rescale(self, X_output):
-        return X_output*self._ptp + self._min
-
-    def fit(self, X, Y, epochs, batch_size=256, verbose=1):
-        if self.is_scale:
-            X, Y = self.scale(X, Y)
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
         return self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose,
-                            callbacks = [tf.keras.callbacks.ReduceLROnPlateau('loss',0.2,20)])
+                            validation_data=eval_set,
+                            callbacks = callbacks)
 
     def predict(self, X):
-        if self.is_scale:
-            X = self.scale(X)
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
         X_pred = self.pnn.predict(X_input,verbose=0)
-        X_pred = self.rescale(X_pred)
         return X_pred[:,-self.num_targets:]
