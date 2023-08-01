@@ -1,12 +1,12 @@
 import numpy as np
-from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer
-from tensorflow.keras import Input, Model
-from tensorflow.keras import optimizers
-# from keras import backend as K
-# from keras.layers import Layer
-# from keras import Input, Model
-# from keras import optimizers
+# from tensorflow.keras import backend as K
+# from tensorflow.keras.layers import Layer
+# from tensorflow.keras import Input, Model
+# from tensorflow.keras import optimizers
+from keras import backend as K
+from keras.layers import Layer
+from keras import Input, Model
+from keras import optimizers
 import tensorflow as tf
 
 from ..layers.taylor import TaylorMap
@@ -46,7 +46,7 @@ class Regression:
         mse = K.mean(squared_error, axis=0)
         return K.mean(mse)
 
-    def fit(self, X, Y, epochs, lr=1e-3, batch_size=256, verbose=1, eval_set=None, callbacks=[], opt=None):
+    def fit(self, X, Y, epochs, lr=1e-3, batch_size=256, verbose=1, eval_set=None, eval_split=0, callbacks=[], opt=None):
         self.pnn.compile(loss=self.custom_loss, 
                          optimizer=opt or optimizers.legacy.Adamax(learning_rate=lr))
         
@@ -56,7 +56,7 @@ class Regression:
 
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
         return self.pnn.fit(X_input, Y, epochs=epochs, batch_size=batch_size, verbose=verbose,
-                            validation_data=eval_set,
+                            validation_data=eval_set, validation_split=eval_split,
                             callbacks = callbacks)
 
     def predict(self, X):
