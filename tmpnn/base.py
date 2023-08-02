@@ -82,6 +82,5 @@ class TMPNN(tf.keras.Model):
 if __name__=='__main__':
     import numpy as np
     model = TMPNN()
-    model.train_step
-    model.compile('adam', 'mse')
-    model.fit(np.eye(5), np.ones((5,)), epochs=10000, verbose=0)
+    model.compile(tf.keras.optimizers.legacy.Adamax(1e-3), 'mse')
+    model.fit(np.eye(5), np.ones((5,)), epochs=500, verbose=1)
