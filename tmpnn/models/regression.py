@@ -59,7 +59,7 @@ class Regression:
                             validation_data=eval_set, validation_split=eval_split,
                             callbacks = callbacks)
 
-    def predict(self, X):
+    def predict(self, X, *args, **kwargs):
         X_input = np.hstack((X, np.zeros((X.shape[0], self.num_targets))))
-        X_pred = self.pnn.predict(X_input,verbose=0)
+        X_pred = self.pnn.predict(X_input, *args, **kwargs)
         return X_pred[:,-self.num_targets:]
