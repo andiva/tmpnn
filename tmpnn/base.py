@@ -18,7 +18,7 @@ class TaylorMap(tf.keras.layers.Layer):
         self.regularizer = regularizer
 
     def build(self, input_shape):
-        self.n_features = n_features = input_shape[-1]
+        n_features = input_shape[-1]
         n_poly_features = tf.math.reduce_sum(tf.pow([n_features]*(self.degree+1), tf.range(self.degree+1)))
         # n_poly_features = comb(n_features + self.degree, self.degree, True)
         self._pascal = pascal(max(self.degree, n_features))[1 : self.degree, :n_features].tolist()
@@ -28,10 +28,11 @@ class TaylorMap(tf.keras.layers.Layer):
             initializer=self.initializer,
             regularizer=self.regularizer
         )
-        self.W.assign_add(tf.concat([
+        self.I = tf.concat([
             tf.zeros((1, n_features)), 
             tf.eye(n_poly_features-1, n_features)
-        ], 0))
+        ], 0)
+        self.W.assign_add(self.I)
     
     @tf.function
     def _poly(self, X):
@@ -77,7 +78,9 @@ class TMPNN(tf.keras.Model):
         self.taylormap = TaylorMap(degree, regularizer, initializer, dtype)
 
     def change_steps(self, new_steps):
-        self.taylormap.W *= self.steps/new_steps
+        self.taylormap.W.assign(
+            self.taylormap.W * (self.steps/new_steps) + self.taylormap.I * ((new_steps - self.steps)/new_steps)
+        )
         self.steps = new_steps
 
     def _prepare_shape(self, n_features, n_targets):
@@ -85,6 +88,7 @@ class TMPNN(tf.keras.Model):
         self.latent_units += r_targets
         self.targets.extend([n_features + i for i in range(r_targets)])
 
+    @tf.function
     def call(self, inputs):
         x = tf.pad(inputs, [[0, 0], [0, self.latent_units]])
         for _ in range(self.steps):
