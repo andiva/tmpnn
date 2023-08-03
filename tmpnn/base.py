@@ -18,13 +18,10 @@ class TaylorMap(tf.keras.layers.Layer):
         self.regularizer = regularizer
 
     def build(self, input_shape):
-        n_features = n_features = input_shape[-1]
-        n_poly_features = comb(n_features + self.degree, self.degree, True)
-
-        self.n_features = n_features
-        mat_pascal = pascal(max(self.degree, n_features))[1 : self.degree, :n_features]
-        for n_monomials in mat_pascal.tolist():
-            self._monomial_indices.append(tf.ragged.range(n_monomials))
+        self.n_features = n_features = input_shape[-1]
+        n_poly_features = tf.math.reduce_sum(tf.pow([n_features]*(self.degree+1), tf.range(self.degree+1)))
+        # n_poly_features = comb(n_features + self.degree, self.degree, True)
+        self._pascal = pascal(max(self.degree, n_features))[1 : self.degree, :n_features].tolist()
 
         self.W = self.add_weight('W',
             shape=(n_poly_features, n_features),
@@ -35,35 +32,30 @@ class TaylorMap(tf.keras.layers.Layer):
             tf.zeros((1, n_features)), 
             tf.eye(n_poly_features-1, n_features)
         ], 0))
-
-    @tf.function
-    def poly(self, X):
-        '''Tensorflow implementation of PolynomialFeatures'''
-        n_samples = tf.shape(X)[0]
-        XP = [tf.ones((n_samples, 1)), X]
-        X = tf.expand_dims(X, -1)
-        for indices in self._monomial_indices:
-            XP.append(tf.reshape(X * tf.gather(XP[-1], indices, axis=-1), (n_samples, -1)))
-        return tf.concat(XP, -1)
-
-    def call(self, X):
-        return tf.matmul(self.poly(X), self.W)
     
     @tf.function
     def _poly(self, X):
         '''Tensorflow implementation of PolynomialFeatures'''
-        # bias term
-        XP = [tf.ones_like(X[:, 0:1])]
-        # linear term
-        XP += [X[:, i : i+1] for i in range(self.n_features)]
-        # degree >= 2 terms
-        for _ in range(2, self.degree + 1):
-            for feature_idx in range(self.n_features):
-                XP.append(tf.multiply(
-                    tf.concat(XP[-self.n_features : -feature_idx] or XP[-self.n_features:], -1), 
-                    X[:, feature_idx : feature_idx + 1]
-                ))
+        n_samples = tf.shape(X)[0]
+        XP = [tf.ones((n_samples, 1)), X] # degrees 0 and 1
+        for indices in self._pascal: # iterate through degrees >= 2
+            XP.append(tf.concat([
+                X[:, feature_idx : feature_idx + 1] * XP[-1][:, :monomials_idx]
+                for feature_idx, monomials_idx in enumerate(indices)], -1))
         return tf.concat(XP, -1)
+
+    @tf.function
+    def _polyfull(self, X):
+        '''Tensorflow implementation of PolynomialFeatures'''
+        n_samples = tf.shape(X)[0]
+        XP = [tf.ones((n_samples, 1)), X]
+        X = tf.expand_dims(X, -1)
+        for _ in range(2, self.degree + 1):
+            XP.append(tf.reshape(X @ tf.expand_dims(XP[-1], 1), (n_samples, -1)))
+        return tf.concat(XP, -1)
+
+    def call(self, X):
+        return self._polyfull(X) @ self.W
     
 
 class TMPNN(tf.keras.Model):
@@ -139,11 +131,9 @@ class TMPNN(tf.keras.Model):
 
 
 if __name__=='__main__':
-    # from tmpnn import Regression
-    # model = Regression(10,1,2,7)
     model = TMPNN()
     model.compile(tf.keras.optimizers.legacy.Adamax(1e-3), 'mse')
-    model.fit(tf.eye(10), tf.ones((10,)), epochs=5, verbose=0)
+    model.fit(tf.eye(10), tf.ones((10,1)), epochs=5, verbose=0)
     
     import time
     start_time=time.time()
