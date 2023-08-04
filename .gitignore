@@ -157,13 +157,13 @@ cython_debug/
 
 # data files
 *.data
+*.dat
 *.csv
 *.xls
+*.mat
 
 # catboost
 catboost_info/
 
 # macos
 .DS_Store
-
-demo
