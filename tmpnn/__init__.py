@@ -1,3 +1,4 @@
 __version__ = '0.0.1'
 
-from base import TMPNN
+from . import base, models, regularizers
+from .models import TMPNNRegressor
