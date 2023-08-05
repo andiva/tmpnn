@@ -1,5 +1,8 @@
 import tensorflow as tf
+from sklearn.base import BaseEstimator
+
 from scipy.linalg import pascal
+
 from . import regularizers
 
 
@@ -62,25 +65,27 @@ class TaylorMap(tf.keras.layers.Layer):
         return X + self._poly_full(X) @ self.W
 
 
-class TMPNN(tf.keras.Model):
+class TMPNN(tf.keras.Model, BaseEstimator):
     '''Basic class for Taylor-mapped polynomial neural networks'''
+    _DEFAULT_LOSS='mse'
+
     def __init__(self,
             degree=2,
             steps=7,
             latent_units=0,
             latent_init=0, #TODO: list of inits
             latent_init_trainable=False, #TODO: boolean mask
-            target_features=[],
+            target_features=None,
             target_init=0, #TODO: list of inits
             target_init_trainable=False, #TODO: boolean mask
             verbose='auto',
             max_epochs=1000,
-            warmup_epochs=10,
+            # warmup_epochs=10, TODO
             patience=None,
             warm_start=False,
             shuffle=True,
             solver='adamax',
-            loss='mse',
+            loss=None,
             regularizer=None,
             initializer='zeros',
             dtype=None):
@@ -103,6 +108,11 @@ class TMPNN(tf.keras.Model):
             latent_init: Initial value for latent dimensions.
 
             latent_init_trainable: If initial value for latent dimensions are trainable variables or not.
+
+            solver: str | Optimizer: learning rate and schedule can be specified in an optimizer instance.
+                #TODO: impement separately
+
+            loss: if None task-dependant default value will be used
         '''
         super().__init__(dtype=dtype, name='TMPNN')
         self.degree=degree
@@ -115,7 +125,7 @@ class TMPNN(tf.keras.Model):
         self.target_init_trainable=target_init_trainable
         self.verbose=verbose
         self.max_epochs=max_epochs
-        self.warmup_epochs=warmup_epochs
+        # self.warmup_epochs=warmup_epochs
         self.patience=patience
         self.warm_start=warm_start
         self.shuffle=shuffle
@@ -132,8 +142,8 @@ class TMPNN(tf.keras.Model):
         '''
         n_features, n_targets = input_shape[-1], output_shape[-1]
 
-        r_targets = n_targets - len(self.target_features)
-        self._targets = self.target_features + [n_features + i for i in range(r_targets)]
+        r_targets = n_targets - len(self.target_features or [])
+        self._targets = (self.target_features or []) + [n_features + i for i in range(r_targets)]
 
         self._paddings = tf.constant([[0, 0], [0, r_targets + self.latent_units]])
 
@@ -181,8 +191,9 @@ class TMPNN(tf.keras.Model):
             sample_weight=None,
             callbacks=None):
         if not self.built or (self.built and not self.warm_start):
+            #TODO: random state, warmup, schedules
             self.build(X.shape, y.shape)
-            self.compile(self.solver, self.loss)
+            self.compile(self.solver, self.loss or self._DEFAULT_LOSS)
 
         epochs = epochs or self.max_epochs
         verbose = verbose if verbose is not None else self.verbose
@@ -220,13 +231,15 @@ class TMPNN(tf.keras.Model):
         )
 
 
-if __name__=='__main__':
+if __name__=='__main__': # to run this test comment row 6 with relative import
     import regularizers
     tf.keras.utils.set_random_seed(0)
-    model = TMPNN().fit(tf.eye(10), tf.ones((10,1)), epochs=3, verbose=0)
+    model = TMPNN(solver=tf.keras.optimizers.legacy.Adamax(
+        tf.keras.optimizers.schedules.CosineDecay(1e-4,100,0,None,1e-3,10)))
+    model.fit(tf.eye(10), tf.ones((10,1)), epochs=100)
 
     import time
     start_time=time.time()
     model.predict(tf.ones((10000,10)),1000)
     end_time=time.time()
-    print(f'```TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)``` takes {(end_time-start_time):3.3f}s')
+    print(f'```TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)``` takes {(end_time - start_time):3.3f}s')
