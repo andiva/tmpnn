@@ -88,6 +88,7 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             loss=None,
             regularizer=None,
             initializer='zeros',
+            norm_layer=None,#experimentral
             dtype=None):
         '''
             degree: Taylor mapping degree of the internal ODE.
@@ -113,6 +114,8 @@ class TMPNN(tf.keras.Model, BaseEstimator):
                 #TODO: impement separately
 
             loss: if None task-dependant default value will be used
+
+            norm_layer: keras BatchNorm or LayerNorm or any other layer. Identuty if None. Experimental.
         '''
         super().__init__(dtype=dtype, name='TMPNN')
         self.degree=degree
@@ -133,12 +136,13 @@ class TMPNN(tf.keras.Model, BaseEstimator):
         self.loss=loss
         self.regularizer=regularizer
         self.initializer=initializer
+        self.norm_layer=norm_layer#experimentral
 
     def build(self, input_shape, output_shape):
         '''
             Adjusts latents units and targets indices with given training data shapes,
             builds weights and sublayers at the beginning of the fitting routine,
-            thus model shouldn't be called directly, only with fit/predict.
+            thus model shouldn't be called directly, only with fit().
         '''
         n_features, n_targets = input_shape[-1], output_shape[-1]
 
@@ -163,23 +167,34 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             )
             self._inits.append(l)
 
+        self._build_interlayer()#experimentral
+
         self._taylormap = TaylorMap(self.degree, self.regularizer, self.initializer, self.dtype)
         super().build(input_shape)
 
+    def _build_interlayer(self):#experimentral
+        interlayer = self.norm_layer or tf.keras.layers.Identity()
+        clsname = interlayer.__class__.__name__
+        config = interlayer.get_config()
+        self._interlayers = [tf.keras.layers.deserialize({'class_name':clsname,'config':config}) for _ in range(self.steps)]
+
     @tf.function
-    def _call_full(self, inputs):
+    def _call_full(self, inputs, training=False):
+        '''Call function returning the whole final state'''
         x = tf.pad(inputs, self._paddings) + tf.concat(self._inits, -1)
-        for _ in range(self.steps):
+        for step in range(self.steps):
+            x = self._interlayers[step](x, training=training)#experimentral
             x = self._taylormap(x)
         return x
 
-    def call(self, inputs):
-        return tf.gather(self._call_full(inputs), self._targets, axis=-1)
+    def call(self, inputs, training=False):
+        return tf.gather(self._call_full(inputs, training), self._targets, axis=-1)
 
     def change_steps(self, new_steps):
         '''Changes network's depth/steps with proper weight transfer.'''
         self._taylormap.W.assign(self._taylormap.W * (self.steps/new_steps))
         self.steps = new_steps
+        self._build_interlayer()
 
     def fit(self, X, y,
             batch_size=None,
@@ -190,7 +205,7 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             class_weight=None,
             sample_weight=None,
             callbacks=None):
-        if not self.built or (self.built and not self.warm_start):
+        if not self.built or not self.warm_start:
             #TODO: random state, warmup, schedules
             self.build(X.shape, y.shape)
             self.compile(self.solver, self.loss or self._DEFAULT_LOSS)
@@ -234,12 +249,14 @@ class TMPNN(tf.keras.Model, BaseEstimator):
 if __name__=='__main__': # to run this test comment row 6 with relative import
     import regularizers
     tf.keras.utils.set_random_seed(0)
-    model = TMPNN(solver=tf.keras.optimizers.legacy.Adamax(
-        tf.keras.optimizers.schedules.CosineDecay(1e-4,100,0,None,1e-3,10)))
+    model = TMPNN(
+        solver=tf.keras.optimizers.legacy.Adamax(tf.keras.optimizers.schedules.CosineDecay(1e-4,100,0,None,1e-3,10)),
+        norm_layer=tf.keras.layers.BatchNormalization()
+    )
     model.fit(tf.eye(10), tf.ones((10,1)), epochs=100)
 
     import time
     start_time=time.time()
     model.predict(tf.ones((10000,10)),1000)
     end_time=time.time()
-    print(f'```TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)``` takes {(end_time - start_time):3.3f}s')
+    print(f'`TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)` takes {(end_time - start_time):3.3f}s')
