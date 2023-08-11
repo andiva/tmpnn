@@ -1,39 +1,41 @@
 import numpy as np
-# from tensorflow.keras import backend as K
-# from tensorflow.keras.layers import Layer
-# from tensorflow.keras import Input, Model
-# from tensorflow.keras import optimizers
-from keras import backend as K
-from keras.layers import Layer
-from keras import Input, Model
-from keras import optimizers
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Layer
+from tensorflow.keras import Input, Model
+from tensorflow.keras import optimizers
+# from keras import backend as K
+# from keras.layers import Layer
+# from keras import Input, Model
+# from keras import optimizers
 import tensorflow as tf
 
 from ..layers.taylor import TaylorMap
 
 
 class Regression:
-    def __init__(self, num_features, num_targets, order=2, steps=10):
+    def __init__(self, num_features, num_targets, order=2, steps=10, regularizer=None):
         self.order = order
         self.steps = steps
 
         self.num_features = num_features
         self.num_targets = num_targets
-        self.pnn, self.pnn_hidden = self.create_graph()
+        self.pnn, self.pnn_hidden = self.create_graph(regularizer)
         return
 
-    def create_graph(self):
+    def create_graph(self,regularizer):
         inputDim = self.num_features + self.num_targets
         outputDim = self.num_features + self.num_targets
 
         input = Input(shape=(inputDim,))
         m = input
-        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order)
+        tm = TaylorMap(output_dim = outputDim, input_shape = (inputDim,), order=self.order, weights_regularizer=regularizer)
 
         outs = []
-        for i in range(self.steps):
+        for i in range(self.steps-1):
             m = tm(m)
             outs.append(m)
+        m = tm(m,reg=True)
+        outs.append(m)
 
         model = Model(inputs=input, outputs=m)
         model_full = Model(inputs=input, outputs=outs)
@@ -47,9 +49,9 @@ class Regression:
         return K.mean(mse)
 
     def fit(self, X, Y, epochs, lr=1e-3, batch_size=256, verbose=1, eval_set=None, eval_split=0, callbacks=[], opt=None):
-        self.pnn.compile(loss=self.custom_loss, 
+        self.pnn.compile(loss=self.custom_loss,
                          optimizer=opt or optimizers.legacy.Adamax(learning_rate=lr))
-        
+
         if eval_set:
             ev_X, ev_Y = eval_set[0], eval_set[1]
             eval_set = (np.hstack((ev_X, np.zeros((ev_X.shape[0], self.num_targets)))), ev_Y)
