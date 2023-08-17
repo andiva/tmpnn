@@ -223,8 +223,8 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             (0 if estimator_target_intercept else r_targets) + \
             (0 if estimator_latent_intercept else self.latent_units)
         if free_pad:
-            paddings = tf.zeros(free_pad)
-            self._pre_call_blocks.append(lambda x: tf.ones((x.shape[0], 1)) * paddings)
+            paddings = np.zeros((free_pad))
+            self._pre_call_blocks.append(lambda x: np.ones((x.shape[0], 1)) * paddings)
         if estimator_latent_intercept:
             self._pre_call_blocks.append(estimator_latent_intercept)
 
@@ -270,11 +270,10 @@ class TMPNN(tf.keras.Model, BaseEstimator):
         config = interlayer.get_config()
         self._interlayers = [tf.keras.layers.deserialize({'class_name':clsname,'config':config}) for _ in range(self.steps)]
 
-    @tf.function
-    def _pre_call(self, inputs, training=False):
+    def _pre_call(self, inputs):
         '''Perform untrainable feature preprocessing, thus can be called before fit.'''
-        x = tf.concat([inputs] + [block(inputs) for block in self._pre_call_blocks], -1)
-        return tf.gather(x, self._permutation, axis=-1)
+        x = np.hstack([inputs] + [block(inputs) for block in self._pre_call_blocks])
+        return x[:,self._permutation]
 
     @tf.function
     def _call_full(self, inputs, training=False):
@@ -375,7 +374,6 @@ if __name__=='__main__': # to run this test comment row 6 with relative import
 
     import time
     start_time=time.time()
-    # model.predict(tf.ones((10000,10)),10000)
-    model.call(tf.ones((10000,11)))
+    model.predict(tf.ones((10000,10)),10000)
     end_time=time.time()
     print(f'`TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)` takes {(end_time - start_time):3.3f}s')
