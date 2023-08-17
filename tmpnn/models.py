@@ -112,3 +112,9 @@ class TMPNNClassifierPL(TMPNN, ClassifierMixin): #TODO
     '''Taylor-mapped polynomial neural network multiclass classifier based on Picard-Lindelöf theorem'''
     def call(self, inputs):
         return super()._call_full(inputs)
+
+if __name__=='__main__':  # to run this test comment row 5 with relative import
+    from sklearn.utils.estimator_checks import check_estimator
+    print(check_estimator(TMPNNRegressor()))
+    print(check_estimator(TMPNNLogisticRegressor()))
+    print(check_estimator(TMPNNClassifier()))

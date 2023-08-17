@@ -4,7 +4,7 @@ import numpy as np
 
 from scipy.linalg import pascal
 
-# from . import regularizers
+from . import regularizers
 
 
 class TaylorMap(tf.keras.layers.Layer):
@@ -44,7 +44,7 @@ class TaylorMap(tf.keras.layers.Layer):
     def _poly(self, X):
         '''Tensorflow implementation of PolynomialFeatures.'''
         n_samples = tf.shape(X)[0]
-        XP = [tf.ones((n_samples, 1)), X] # degrees 0 and 1
+        XP = [tf.ones((n_samples, 1), self.dtype), X] # degrees 0 and 1
         for indices in self._pascal: # iterate through degrees >= 2
             XP.append(tf.concat([
                 X[:, feature_idx : feature_idx + 1] * XP[-1][:, :monomials_idx]
@@ -55,7 +55,7 @@ class TaylorMap(tf.keras.layers.Layer):
     @tf.function
     def _poly_full(self, X):
         n_samples = tf.shape(X)[0]
-        XP = [tf.ones((n_samples, 1)), X] # degrees 0 and 1
+        XP = [tf.ones((n_samples, 1), self.dtype), X] # degrees 0 and 1
         X = tf.expand_dims(X, -1)
         for _ in range(2, self.degree + 1): # iterate through degrees >= 2
             XP.append(tf.reshape(X @ tf.expand_dims(XP[-1], 1), (n_samples, -1)))
@@ -229,8 +229,8 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             self._pre_call_blocks.append(estimator_latent_intercept)
 
         # create weights for intercepts
-        self._intercept = [tf.zeros((self.n_features_))]
-        self._local_intecepts = [tf.zeros(input_shape)]
+        self._intercept = [tf.zeros((self.n_features_), self.dtype)]
+        self._local_intecepts = [tf.zeros(input_shape, self.dtype)]
         if r_targets > 0:
             self._intercept.append(self.add_weight('target_intercept',
                 (r_targets),
@@ -262,7 +262,7 @@ class TMPNN(tf.keras.Model, BaseEstimator):
             self._taylormap.W.assign(self.guess_coef/self.steps)
         self._build_interlayer()#experimentral
         # build whole model
-        super().build((n_samples, n_states))
+        self.built=True
 
     def _build_interlayer(self):#experimentral
         interlayer = self.interlayer or tf.keras.layers.Identity()
@@ -368,12 +368,13 @@ if __name__=='__main__': # to run this test comment row 6 with relative import
         interlayer=None,#tf.keras.layers.BatchNormalization(),
         latent_units=0,
         fit_target_intercept=2,
-        fit_latent_intercept=0
+        fit_latent_intercept=0,
+        dtype=tf.float16
     )
-    model.fit(tf.eye(10), tf.ones((10,1)), epochs=2, verbose=0)
+    model.fit(np.eye(10), np.ones((10,1)), epochs=2, verbose=0)
 
     import time
     start_time=time.time()
-    model.predict(tf.ones((10000,10)),10000)
+    model.predict(np.ones((10000,10)),10000)
     end_time=time.time()
     print(f'`TMPNN().predict(x=tf.ones((10000,10)), batch_size=1000)` takes {(end_time - start_time):3.3f}s')
