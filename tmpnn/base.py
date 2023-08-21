@@ -17,7 +17,7 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from scipy.special import comb
 from scipy.linalg import pascal
 
-from tmpnn._utils import tensorflow_random_state, check_sample_weight
+from ._utils import tensorflow_random_state, check_sample_weight
 
 
 # ------------------------------------------------------------------------------
@@ -479,8 +479,8 @@ class TMPNNEstimator(BaseEstimator):
             estimators=self.intercept_estimators).fit(X, y)
 
         intercept_schema = self.intercept_schema or {
-            'target':[Intercept(max(0, self._preprocessor._rt_ne))],
-            'latent':[Intercept(self.latent_units + min(0, self._preprocessor._rt_ne))]
+            'target': [Intercept(max(0, self._preprocessor._rt_ne))],
+            'latent': [Intercept(self.latent_units + min(0, self._preprocessor._rt_ne))]
         }
         self._model = TMPNN(
             n_targets=self.n_target_in_,
