@@ -7,33 +7,18 @@ Regreessor, several Classifiers, metric learning Transformer
 
 import tensorflow as tf
 import numpy as np
-from sklearn.base import RegressorMixin, ClassifierMixin, MultiOutputMixin, TransformerMixin
+from sklearn.base import BaseEstimator, RegressorMixin, ClassifierMixin, MultiOutputMixin, TransformerMixin
 
-from .base import TMPNN
+from .base import TMPNNEstimator
 
 
-class TMPNNRegressor(TMPNN, RegressorMixin, MultiOutputMixin):
+class TMPNNRegressor(TMPNNEstimator, RegressorMixin, MultiOutputMixin):
     '''Taylor-mapped polynomial neural network regressor'''
-    def fit(self, X, y,
-            batch_size=None,
-            epochs=None,
-            verbose=None,
-            callbacks=None,
-            validation_split=0,
-            validation_data=None,
-            sample_weight=None):
-        return super().fit(X, y,
-            batch_size,
-            epochs,
-            verbose,
-            callbacks,
-            validation_split,
-            validation_data,
-            None,
-            sample_weight)
+    def fit(self, X, y, batch_size=None, epochs=None, validation_split=0, validation_data=None, sample_weight=None) -> BaseEstimator:
+        return super().fit(X, y, batch_size, epochs, validation_split, validation_data, None, sample_weight)
 
 
-class TMPNNLogisticRegressor(TMPNN, ClassifierMixin, MultiOutputMixin):
+class TMPNNLogisticRegressor(TMPNNEstimator, ClassifierMixin, MultiOutputMixin):
     '''Taylor-mapped polynomial neural network multilabel logistic regressor - multioutput binary classifier'''
 
     _DEFAULT_LOSS='binary_crossentropy'
@@ -51,7 +36,7 @@ class TMPNNLogisticRegressor(TMPNN, ClassifierMixin, MultiOutputMixin):
         return np.log(super().predict(X, batch_size, verbose))
 
 
-class TMPNNClassifier(TMPNN, ClassifierMixin):
+class TMPNNClassifier(TMPNNEstimator, ClassifierMixin):
     '''Taylor-mapped polynomial neural network multiclass classifier'''
 
     _DEFAULT_LOSS='categorical_crossentropy'
@@ -69,7 +54,7 @@ class TMPNNClassifier(TMPNN, ClassifierMixin):
         return np.log(super().predict(X, batch_size, verbose))
 
 
-class TMPNNClassifierPL(TMPNN, TransformerMixin): #TODO
+class TMPNNPLTransformer(TMPNNEstimator, TransformerMixin): #TODO
     '''Taylor-mapped polynomial neural network multiclass classifier based on Picard-Lindelöf theorem'''
     def call(self, inputs):
         return super()._call_full(inputs)
