@@ -1,3 +1,8 @@
+'''Base classes and subclasses for TMPNNEstimator
+
+Contains intercepr layers, taylormap layers,
+keras realisation and sklearn wrapper.
+'''
 from dataclasses import dataclass, InitVar
 from typing import Any, List, Dict, Tuple, Optional, Union
 from collections.abc import Iterable
@@ -425,12 +430,155 @@ class TMPNNPrepocessor(BaseEstimator, TransformerMixin):
 
 @dataclass
 class TMPNNEstimator(BaseEstimator):
+    '''Estimator wrapping for Taylor Map Polynomial Neural Network
+
+    This model optimizes the squared error using LBFGS or stochastic gradient
+    descent.
+
+    Parameters
+    ----------
+    degree : int, defualt=2
+
+    steps : int, defualt=7
+
+    latent_units: int, defualt=0
+
+    target_features: list of int, defualt=None
+        Features indices to chose as target initial values.
+
+    guess_target_intercept : int, array, defualt=0
+        value to initialize intercept for targets
+
+    fit_target_intercept : bool, int, defualt=0
+        0 - const, 1 - fit global value,
+        2 - fit local values, 3 - fit local shrinked values.
+
+    guess_latent_intercept : int, array, defualt=0
+        value to initialize intercept for targets
+
+    fit_latent_intercept : bool, int, defualt=0
+        0 - const, 1 - fit global value,
+        2 - fit local values, 3 - fit local shrinked values.
+
+    intercept_estimators: list of estimators, default=None
+        Estimators or callables to estimate intercepts from X.
+
+    scaled: bool, default=False
+        Prescale features before compute polynomials
+        to avoid Nans, change family of approximator functions.
+
+    regularizer: Keras regulariszer, default=None
+        Regularizer for TaylorMap weight and final coef.
+
+    initializer: Keras initializer, default=None
+        When set to None, zeros initialization is used for coef.
+
+    residual: bool, default=True
+        Compute TaylorMap as residual layer if true,
+        Init TaylorMap.weight with Eye if false.
+        Mathematically equal.
+
+    guess_coef: array, default=None
+        Initial value for coef.
+        When set to None, initializer is used.
+
+    interlayer: Keras layer, default=None
+        Layer to go through before TaylorMap.
+        BatchNorm, Dropout, any other norm, etc.
+        Whet set to None, Identity is used.
+
+    intercept_schema: dict of lists of Intercept objects, default=None
+        Is used to initialize intercept directly.
+        When set, guess_..._intercept and fit_..._intercept is ignored.
+
+    optimiser : Keras optimizer, default='adamax'
+
+    max_epochs : int, default=100
+        Maximum number of iterations. This determines the number of epochs
+        (how many times each data point will be used), not the number of
+        gradient steps.
+
+    verbose : bool, int, str, default=False
+        Whether to print progress messages to stdout.
+
+    loss : Keras loss, defualt=None
+        Custom loss. When set to None, task-dependant default value.
+
+    metrics : Keras metrics, default=None
+        Metrics to compute during training
+
+    weighted_metrics : Keras weighted metrics, default=None
+        Metrics weigthed with sample_weight
+
+    shuffle : bool, default=True
+        Whether to shuffle samples in each iteration.
+
+    warm_start : bool, default=False
+        When set to True, reuse the solution of the previous
+        call to fit as initialization, otherwise, just erase the
+        previous solution.
+
+    patience : int, default=None
+        Maximum number of epochs to not meet improvement before earlystopping.
+        If set to None, equal to max_epochs
+
+    random_state : int, RandomState instance, default=None
+        Determines random number generation for weights and bias
+        initialization, validation split, and batch
+        sampling.
+        Pass an int for reproducible results across multiple function calls.
+
+    dtype: str, np.dtype, tf.dtype, default=None
+        dtype of model's weights
+
+    Attributes
+    ----------
+    history_ : dict with losses and metrics history both training and validation:
+        'loss', 'val_loss', etc. each histury is list of shape (n_epoches,)
+
+    coef_ : array of shape (n_poly_features, n_features_in_)
+        Represents the coef of an internal ODE, which depends of TaylorMap weight
+        as coef_ = (Taylor map weight - Eye * residual) * steps
+
+    intercept_schema_ : dict of lists of Intercepts for target dimensions and
+        latent dimensions. Intercept.guess is its value.
+
+    n_features_in_ : int
+        Number of features seen during :term:`fit`.
+
+    feature_names_in_ : ndarray of shape (`n_features_in_`,)
+        Names of features seen during :term:`fit`. Defined only when `X`
+        has feature names that are all strings.
+
+    See Also
+    --------
+    TMPNNRegressor : Taylor-mapped PNN regressor.
+    TMPNNLogisticRegressor : Multioutput Taylor-mapped PNN binary classifier.
+    TMPNNClassifier : Taylor-mapped PNN multiclass classifier.
+    TMPNNPLTransformer : Taylor-mapped PNN transformer for classifiers
+        based on Picard-Lindelöf theorem.
+    Lyapunov : regularizer penalting positive eigenvalues of linear weight,
+        increases stability of equallibrium solutions
+
+    Notes
+    -----
+    TMPNN trains iteratively since at each time step
+    the partial derivatives of the loss function with respect to the model
+    parameters are computed to update the parameters.
+
+    It can also have a regularization term added to the loss function
+    that shrinks model parameters to prevent overfitting.
+
+    This implementation works with data represented as dense numpy
+    arrays of floating point values.
+
+    '''
     # major
     degree: int = 2
     steps: int = 7
     # prepocessor and intercept
     latent_units: int = 0
-    target_features: None | List[int] | Tuple[int] = None
+    target_features: Optional[List[int]] = None
     guess_target_intercept: Any = 0
     fit_target_intercept: int = 0
     guess_latent_intercept: Any = 0
@@ -470,6 +618,7 @@ class TMPNNEstimator(BaseEstimator):
         }
 
     def _init(self, X, y):
+        '''Initialise inner TMPNN and preprocessor'''
         self.n_features_in_ = np.shape(X)[1]
         self.n_target_in_ = np.shape(y)[1]
 
@@ -543,7 +692,46 @@ class TMPNNEstimator(BaseEstimator):
             class_weight=None,
             sample_weight=None
             ):
-        '''Fits estimator'''
+        '''Fit the model to data matrix X and target(s) y.
+
+        Parameters
+        ----------
+        X : ndarray or sparse matrix of shape (n_samples, n_features)
+            The input data.
+
+        y : ndarray of shape (n_samples,) or (n_samples, n_outputs)
+            The target values (class labels in classification, real numbers in
+            regression).
+
+        batch_size : int, default=None
+            Size of minibatches for stochastic optimizers.
+            When set to None, 'auto' Keras batch_size applies.
+
+        epochs : int, default=None
+            Number of iterations. This determines the number of epochs
+            (how many times each data point will be used), not the number of
+            gradient steps.
+            When set to None, self.max_epochs is used.
+
+        validation_split : float, default=0
+            The proportion of training data to set aside as validation set for
+            early stopping. Must be between 0 and 1.
+
+        validation_data : tuple(X, y), default=None
+            Validation samples.
+
+        class_weight : array, default=None
+            Loss weights for classes.
+
+        sample_weight : array, default=None
+            Loss weights for samples.
+
+        Returns
+        -------
+        self : object
+            Returns a trained TMPNNEstimator.
+        '''
+        from sklearn.neural_network import MLPRegressor
         # check inputs
         X, y = check_X_y(X, y, multi_output=True, y_numeric=True)
         y_shape = list(np.shape(y))
@@ -575,7 +763,26 @@ class TMPNNEstimator(BaseEstimator):
         return self
 
     def predict(self, X, batch_size=None, verbose=None):
-        '''Predicts targets.'''
+        '''Predict using the Taylor-mapped Polynomial Neural Network model.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            The input data.
+
+        batch_size : int, default=None
+            Size of batches for vectorised computation.
+            When set to None, 'auto' Keras batch_size applies.
+
+        verbose : bool, int default=None
+            local vebosity level for prediction.
+            When set to None, global estimators verbose level applies.
+
+        Returns
+        -------
+        y : ndarray of shape (n_samples, n_outputs) or (n_samples,)
+            The predicted values. ndim is the same as y's provided to fit.
+        '''
         check_is_fitted(self, 'history_')
         X = check_array(X)
         X = self._preprocessor.transform(X)
