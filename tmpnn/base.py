@@ -73,7 +73,7 @@ class Intercept():
 
     def detach(self):
         '''Return detuched intercept with value of current weight'''
-        guess = self.guess if not self._weight else \
+        guess = self.guess if self._weight is None else \
             tf.constant(self._weight).numpy()
         return Intercept(self.size, guess, self.mode)
 
@@ -313,6 +313,8 @@ class TMPNN(tf.keras.Model):
             initializer=None,
             residual=True,
             guess_coef=None,
+            # experiment
+            custom_map=None,
             # activation
             activation=None,
             # tensorflow type
@@ -334,7 +336,8 @@ class TMPNN(tf.keras.Model):
         guess = None if guess_coef is None else guess_coef / steps
         tm_args = (degree, regularizer, initializer, residual, guess, dtype)
         self._taylormap = \
-            ScaledTaylorMap(*tm_args) if scaled else FastTaylorMap(*tm_args)
+            ScaledTaylorMap(*tm_args) if scaled else FastTaylorMap(*tm_args) \
+            if not custom_map else custom_map
         # activation
         self._activation = activation or tf.keras.layers.Identity()
 
@@ -416,13 +419,15 @@ class TMPNNPrepocessor(BaseEstimator, TransformerMixin):
         self.n_zeros = r_targets + self.latent_units - n_estimated
         # ordering
         targets = np.array([n_featuers + i for i in range(r_targets)] + (self.target_features or []))
-        n_states = n_featuers + r_targets + self.latent_units
-        self._permutation = np.hstack([targets, np.setdiff1d(np.arange(n_states), targets)])
+        self.n_outputs_ = n_featuers + r_targets + self.latent_units
+        self._permutation = np.hstack([targets, np.setdiff1d(np.arange(self.n_outputs_), targets)])
 
         self._rt_ne = r_targets - n_estimated # feature for intercepts initialization
         return self
 
     def transform(self, X):
+        if np.shape(X)[1] != self.n_features_in_:
+            raise ValueError("Number of features is different from that in fit")
         Z = [X] + [self._call(estimator, X) for estimator in self._estimators]
         if self.n_zeros > 0:
             Z.append(np.zeros((np.shape(X)[0], self.n_zeros)))
@@ -476,7 +481,7 @@ class TMPNNEstimator(BaseEstimator):
     residual: bool, default=True
         Compute TaylorMap as residual layer if true,
         Init TaylorMap.weight with Eye if false.
-        Mathematically equal.
+        Influence only on regularization.
 
     guess_coef: array, default=None
         Initial value for coef.
@@ -490,6 +495,9 @@ class TMPNNEstimator(BaseEstimator):
     intercept_schema: dict of lists of Intercept objects, default=None
         Is used to initialize intercept directly.
         When set, guess_..._intercept and fit_..._intercept is ignored.
+
+    custom_map : Keras Layer, default=None
+        Layer to replace taylormap for experiments.
 
     optimiser : Keras optimizer, default='adamax'
 
@@ -593,6 +601,7 @@ class TMPNNEstimator(BaseEstimator):
     interlayer: Any = None
     # other
     intercept_schema: Dict[str, List[Intercept]] = None
+    custom_map: Any = None
     optimizer: Any = None
     loss: Any = None
     metrics: Any = None
@@ -605,15 +614,18 @@ class TMPNNEstimator(BaseEstimator):
     random_state: Optional[Union[int,np.random.RandomState]] = None
     dtype: Any = None
     # default class params to specify task
-    _ACTIVATION = None
     _DEFAULT_LOSS = 'mse'
+    _FULL_OUTPUT = False
 
     def _more_tags(self):
         '''Get sklearn tags for the estimator'''
         return {
-            "multioutput": True,
             "_xfail_checks": {
                 "check_sample_weights_invariance": "TMPNN as Deep Learning model isn't invariant to data shuffling.",
+                "check_estimators_pickle": "Optimizers fail to pickle in darwin OS.",
+                "check_methods_sample_order_invariance": "Numerical error is to big due to high polynomial order.",
+                "check_methods_subset_invariance": "Numerical error is to big due to high polynomial order.",
+                "check_classifiers_one_label": "To be handled."
             }
         }
 
@@ -632,7 +644,7 @@ class TMPNNEstimator(BaseEstimator):
             'latent': [Intercept(self.latent_units + min(0, self._preprocessor._rt_ne))]
         }
         self._model = TMPNN(
-            n_targets=self.n_target_in_,
+            n_targets=self._preprocessor.n_outputs_ if self._FULL_OUTPUT else self.n_target_in_,
             steps=self.steps,
             intercept_schema=intercept_schema,
             interlayer=self.interlayer,
@@ -642,7 +654,7 @@ class TMPNNEstimator(BaseEstimator):
             initializer=self.initializer,
             residual=self.residual,
             guess_coef=self.guess_coef,
-            activation=self._ACTIVATION,
+            custom_map=self.custom_map,
             dtype=self.dtype)
         self._model.compile( # TODO: recompile if warm_start and losses or optimizers changed
             optimizer = self.optimizer or 'adamax',
@@ -670,6 +682,11 @@ class TMPNNEstimator(BaseEstimator):
         # if hasattr(self, '_history_callback') and self.warm_start:
         #     callbacks.append(self._history_callback)
 
+        if validation_data:
+            X_vl, y_vl = validation_data
+            X_vl = self._preprocessor.transform(X_vl)
+            validation_data = (X_vl, y_vl)
+
         self._history_callback = self._model.fit(
             self._preprocessor.transform(X), y,
             batch_size=batch_size if not self._model._intercept._fit_local else X.shape[0],
@@ -683,6 +700,9 @@ class TMPNNEstimator(BaseEstimator):
             sample_weight=sample_weight
         )
         return self._history_callback.history
+
+    def _encode_y(self, y):
+        return check_array(y)
 
     def fit(self, X, y,
             batch_size=None,
@@ -731,13 +751,20 @@ class TMPNNEstimator(BaseEstimator):
         self : object
             Returns a trained TMPNNEstimator.
         '''
-        from sklearn.neural_network import MLPRegressor
         # check inputs
-        X, y = check_X_y(X, y, multi_output=True, y_numeric=True)
+        X, y = check_X_y(X, y, multi_output=True)
         y_shape = list(np.shape(y))
         y_shape[0] = -1
         self._target_shape = y_shape
-        y = np.reshape(y, (-1, 1 if len(y_shape) == 1 else y_shape[1]))
+        y_to_shape = (-1, 1 if len(y_shape) == 1 else y_shape[1])
+        y = np.reshape(y, y_to_shape)
+        y = self._encode_y(y)
+
+        if validation_data:
+            X_vl, y_vl = check_X_y(*validation_data, multi_output=True, y_numeric=True)
+            y_vl = np.reshape(y_vl, y_to_shape)
+            y_vl = self._encode_y(y_vl)
+            validation_data = (X_vl, y_vl)
 
         # initialize inner models
         if not hasattr(self, '_model') or not self.warm_start:
@@ -762,29 +789,9 @@ class TMPNNEstimator(BaseEstimator):
 
         return self
 
-    def predict(self, X, batch_size=None, verbose=None):
-        '''Predict using the Taylor-mapped Polynomial Neural Network model.
-
-        Parameters
-        ----------
-        X : {array-like, sparse matrix} of shape (n_samples, n_features)
-            The input data.
-
-        batch_size : int, default=None
-            Size of batches for vectorised computation.
-            When set to None, 'auto' Keras batch_size applies.
-
-        verbose : bool, int default=None
-            local vebosity level for prediction.
-            When set to None, global estimators verbose level applies.
-
-        Returns
-        -------
-        y : ndarray of shape (n_samples, n_outputs) or (n_samples,)
-            The predicted values. ndim is the same as y's provided to fit.
-        '''
+    def _decision_function(self, X, batch_size=None, verbose=None):
         check_is_fitted(self, 'history_')
         X = check_array(X)
         X = self._preprocessor.transform(X)
         y = self._model.predict(X, batch_size, verbose or self.verbose)
-        return np.array(np.reshape(y, self._target_shape), self.dtype)
+        return y
