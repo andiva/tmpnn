@@ -61,8 +61,7 @@ class Intercept():
         weight = layer.add_weight(
             shape = (n_samples if self.mode >= InterceptMode.LOCAL
                 else 1, self.size),
-            initializer = lambda shape, dtype:
-                tf.reshape(tf.constant(self.guess, dtype), shape),
+            initializer = lambda shape, dtype: tf.reshape(tf.constant(self.guess, dtype), shape),
             regularizer = None if self.mode != InterceptMode.LOCAL_REG else
                 lambda i: InterceptMode._REG_STRENGTH *
                             tf.reduce_mean(tf.math.reduce_variance(i, 0)),
@@ -224,7 +223,8 @@ class TaylorMap(tf.keras.layers.Layer):
 
         self._W = self.add_weight('W',
             shape=weight_shape,
-            initializer=self.initializer if self.guess is None else lambda s: self.guess,
+            initializer=self.initializer if self.guess is None else
+                lambda shape, dtype: tf.reshape(tf.constant(self.guess, dtype), shape),
             regularizer=self.regularizer
         )
         if not self.residual:
@@ -640,8 +640,10 @@ class TMPNNEstimator(BaseEstimator):
             estimators=self.intercept_estimators).fit(X, y)
 
         intercept_schema = self.intercept_schema or {
-            'target': [Intercept(max(0, self._preprocessor._rt_ne))],
-            'latent': [Intercept(self.latent_units + min(0, self._preprocessor._rt_ne))]
+            'target': [Intercept(max(0, self._preprocessor._rt_ne),
+                self.guess_target_intercept, self.fit_target_intercept)],
+            'latent': [Intercept(self.latent_units + min(0, self._preprocessor._rt_ne),
+                self.guess_latent_intercept, self.fit_latent_intercept)]
         }
         self._model = TMPNN(
             n_targets=self._preprocessor.n_outputs_ if self._FULL_OUTPUT else self.n_target_in_,
