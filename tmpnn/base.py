@@ -57,11 +57,10 @@ class Intercept():
         return out
 
     def build_weight(self, layer: tf.keras.layers.Layer):
-        n_samples = layer._build_input_shape[0]
+        n_samples = layer._build_input_shape[0] if self.mode >= InterceptMode.LOCAL else 1
         weight = layer.add_weight(
-            shape = (n_samples if self.mode >= InterceptMode.LOCAL
-                else 1, self.size),
-            initializer = lambda shape, dtype: tf.reshape(tf.constant(self.guess, dtype), shape),
+            shape = (n_samples, self.size),
+            initializer = lambda shape, dtype: tf.reshape(tf.constant([self.guess]*n_samples, dtype), shape),
             regularizer = None if self.mode != InterceptMode.LOCAL_REG else
                 lambda i: InterceptMode._REG_STRENGTH *
                             tf.reduce_mean(tf.math.reduce_variance(i, 0)),
@@ -121,8 +120,8 @@ class InterceptLayer(tf.keras.layers.Layer):
             self._intercepts.append(intercept.build_weight(self))
 
     def call(self, inputs, training=False):
-        local_caster = tf.zeros((tf.shape(inputs)[0], 1), dtype=self.dtype)
-        intercept = tf.concat([i + local_caster for i in self._intercepts], -1)
+        local_caster = tf.ones((tf.shape(inputs)[0], 1), dtype=self.dtype)
+        intercept = tf.concat([i * local_caster for i in self._intercepts], -1)
         if not training:
             intercept = tf.reduce_mean(intercept, 0)
         return inputs + intercept
@@ -795,5 +794,7 @@ class TMPNNEstimator(BaseEstimator):
         check_is_fitted(self, 'history_')
         X = check_array(X)
         X = self._preprocessor.transform(X)
-        y = self._model.predict(X, batch_size, verbose or self.verbose)
+        y = self._model.predict(X,
+            batch_size if not self._model._intercept._fit_local else X.shape[0],
+            verbose or self.verbose)
         return y
