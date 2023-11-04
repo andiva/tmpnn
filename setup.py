@@ -10,8 +10,8 @@ setup(
         'tensorflow',
         'scipy',
         'scikit-learn'],
-    author='Andrei Ivanov',
-    author_email='05x.andrey@gmail.com',
+    author='Stefan Maria Ailuro',
+    author_email='steplap2003@gmail.com',
     url='https://github.com/andiva/tmpnn',
     test_suite='tests',
 )
