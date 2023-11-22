@@ -598,6 +598,7 @@ class TMPNNEstimator(BaseEstimator):
     residual: bool = True
     guess_coef: Any = None
     interlayer: Any = None
+    activation: Any = None
     # other
     intercept_schema: Dict[str, List[Intercept]] = None
     custom_map: Any = None
@@ -656,6 +657,7 @@ class TMPNNEstimator(BaseEstimator):
             residual=self.residual,
             guess_coef=self.guess_coef,
             custom_map=self.custom_map,
+            activation=self.activation,
             dtype=self.dtype)
         self._model.compile( # TODO: recompile if warm_start and losses or optimizers changed
             optimizer = self.optimizer or 'adamax',
@@ -784,6 +786,7 @@ class TMPNNEstimator(BaseEstimator):
                 validation_split, validation_data,
                 class_weight, sample_weight)
 
+        self.y_mean_ = np.mean(y, 0)
         self.history_ = history
         self.coef_ = self._model.get_coef()
         self.intercept_schema_ = self._model.get_intercept()
@@ -797,4 +800,7 @@ class TMPNNEstimator(BaseEstimator):
         y = self._model.predict(X,
             batch_size if not self._model._intercept._fit_local else X.shape[0],
             verbose or self.verbose)
+        #fillna
+        inds = np.where(np.isnan(y))
+        y[inds] = np.take(self.y_mean_, inds[1])
         return y
