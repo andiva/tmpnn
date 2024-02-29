@@ -178,7 +178,7 @@ class Lyapunov(tf.keras.regularizers.Regularizer):
         self.alpha = alpha
 
     def __call__(self, W):
-        eigs = tf.exp(-tf.math.real(tf.eig(W[1 : 1 + W.shape[1]])[0]))
+        eigs = tf.exp(tf.math.real(tf.eig(W[1 : 1 + W.shape[1]] - tf.eye(W.shape[1]))[0]))
         return self.alpha * tf.reduce_sum(eigs)
 
     def get_config(self):
